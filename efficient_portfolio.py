@@ -39,7 +39,7 @@ def neg_sharpe_ratio(weights, log_returns, cov_matrix, risk_free_rate):
     return -sharpe_ratio(weights, log_returns, cov_matrix, risk_free_rate)
 
 constraints = {'type': 'eq', 'fun': lambda weights: np.sum(weights) - 1}
-bounds = [(0, 0.1) for _ in range(len(tickers))]
+bounds = [(-0.1, 0.1) for _ in range(len(tickers))]
 initial_weights = np.array([1/len(tickers)]*len(tickers))
 
 

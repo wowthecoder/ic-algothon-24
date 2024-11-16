@@ -7,8 +7,8 @@ DATA_FOLDER = "./data_releases"
 TEAM_NAME = "limoji"
 PASSCODE = "014ls434>"
 SUBMISSION_FILE = "submissions1.txt"
-LATEST_RELEASE = "4059"
-PASSWORD = "HkpYXpKituGernrk"
+LATEST_RELEASE = "4123"
+PASSWORD = "WM5xrwsJiBCo4Unp"
 
 def process_data(file_path, password):
     """
@@ -28,7 +28,9 @@ def clean_data(data):
     """
     print("[DEBUG] Cleaning data...")
     data = data.replace([np.inf, -np.inf], np.nan)  # Replace inf with NaN
-    data = data.fillna(0.0)  # Replace NaN with 0.0
+    data = data.fillna(0.0)  # Replace NaN with 0.0\
+
+    #print(round(data))
     print(f"[DEBUG] Data after cleaning:\n{data}")
     return data
 
@@ -179,5 +181,3 @@ if __name__ == "__main__":
     main()
 
 
-if __name__ == "__main__":
-    main()
