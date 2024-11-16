@@ -1,8 +1,16 @@
 import pandas as pd
 import numpy as np
 import cryptpandas as crp
-import riskfolio.Portfolio as pf
-from riskfolio.Params import Constraints
+import riskfolio as rp
+import logging
+from sklearn.preprocessing import StandardScaler
+import warnings
+
+# Suppress warnings for cleaner output
+warnings.filterwarnings("ignore")
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(message)s')
 
 # Constants
 DATA_FOLDER = "./data_releases"
@@ -12,135 +20,171 @@ SUBMISSION_FILE = "submissions1.txt"
 LATEST_RELEASE = "4507"
 PASSWORD = "Zp4NnKkrC6OT0xms"
 
-def process_data(file_path, password):
+def load_and_decrypt_data(file_path, password):
     """
-    Load and process the latest dataset from the given file path.
+    Load and decrypt the dataset.
     """
     try:
         decrypted_data = crp.read_encrypted(file_path, password=password)
-        print(f"[DEBUG] Successfully decrypted data from {file_path}.")
+        logging.debug(f"Successfully decrypted data from {file_path}.")
         return decrypted_data
     except Exception as e:
-        print(f"[ERROR] Failed to process data from {file_path}: {e}")
+        logging.error(f"Failed to decrypt data: {e}")
         raise
 
 def clean_data(data):
     """
-    Clean the dataset by handling NaN and inf values.
+    Clean the dataset by handling missing, infinite, and extreme outlier values.
     """
-    print("[DEBUG] Cleaning data...")
-    data = data.replace([np.inf, -np.inf], np.nan)  # Replace inf with NaN
-    data = data.fillna(0.0)  # Replace NaN with 0.0
-    print(f"[DEBUG] Data after cleaning:\n{data}")
-    return data
+    try:
+        logging.debug("Cleaning data...")
 
-def optimize_portfolio_riskfolio(data):
+        # Replace infinite values with NaN
+        data.replace([np.inf, -np.inf], np.nan, inplace=True)
+        logging.debug("Replaced infinite values with NaN.")
+
+        # Check for columns with all NaN values
+        all_nan_columns = data.columns[data.isna().all()].tolist()
+        if all_nan_columns:
+            logging.warning(f"Columns with all NaN values: {all_nan_columns}")
+            data.drop(columns=all_nan_columns, inplace=True)
+            logging.debug(f"Dropped columns with all NaN values.")
+
+        # Replace remaining NaN with column median
+        data.fillna(data.median(), inplace=True)
+        logging.debug("Replaced remaining NaN with column medians.")
+
+        # Handle outliers using IQR
+        Q1 = data.quantile(0.25)
+        Q3 = data.quantile(0.75)
+        IQR = Q3 - Q1
+        data = data.clip(lower=Q1 - 1.5 * IQR, upper=Q3 + 1.5 * IQR, axis=1)
+        logging.debug("Handled outliers using IQR method.")
+
+        return data
+    except Exception as e:
+        logging.error(f"Data cleaning failed: {e}")
+        raise
+
+def calculate_returns(data):
     """
-    Optimize portfolio weights using Riskfolio-Lib under specified constraints.
+    Calculate percentage returns from adjusted prices.
     """
-    print("[DEBUG] Optimizing portfolio using Riskfolio-Lib...")
-    
-    # Calculate returns
-    returns = data.pct_change().dropna()
-    
-    # Initialize portfolio object
-    port = pf.Portfolio(returns=returns)
+    try:
+        returns = data.pct_change().dropna()
+        logging.debug("Calculated percentage returns.")
+        return returns
+    except Exception as e:
+        logging.error(f"Return calculation failed: {e}")
+        raise
 
-    # Constraints: Absolute sum = 1, weights within [-0.1, 0.1]
-    constraints = Constraints()
-    constraints.set_constraints(ineq=0.1, eq=1.0, kind='abs')  # Custom constraints
-    
-    # Set objective to maximize Sharpe Ratio
-    port.assets_stats(method_mu="hist", method_cov="hist")
-    weights = port.optimization(model="Classic", rm="Sharpe", constraints=constraints)
-    
-    print(f"[DEBUG] Optimized Weights:\n{weights}")
-    return weights
-
-def validate_constraints(weights):
+def validate_data(data):
     """
-    Validate that the constraints are met:
-    - The abs sum of the positions must be 1.0
-    - The largest abs position must be <= 0.1
+    Validate the dataset to ensure it doesn't contain inf or NaN values.
     """
-    abs_sum = round(weights.abs().sum(), 8)
-    max_abs_position = weights.abs().max()
+    if data.isnull().values.any():
+        logging.error("Data contains NaN values.")
+        raise ValueError("Data contains NaN values.")
+    if np.isinf(data.values).any():
+        logging.error("Data contains infinite values.")
+        raise ValueError("Data contains infinite values.")
+    logging.debug("Data validation passed.")
 
-    abs_sum_ok = abs_sum == 1.0
-    max_abs_ok = max_abs_position <= 0.1
-
-    print(f"[DEBUG] Validation results: abs_sum_ok={abs_sum_ok}, max_abs_ok={max_abs_ok}")
-    if not abs_sum_ok:
-        print("[ERROR] The absolute sum of weights does not equal 1.0.")
-    if not max_abs_ok:
-        print("[ERROR] One or more weights exceed the maximum allowed ±0.1.")
-    return abs_sum_ok, max_abs_ok
-
-def evaluate_performance(weights, data):
+def optimize_portfolio(returns):
     """
-    Evaluate portfolio performance metrics: Sharpe Ratio, Max Drawdown, Cumulative PnL.
+    Optimize portfolio weights using Riskfolio-Lib.
     """
-    returns = data.pct_change().dropna()
-    portfolio_returns = (weights.T @ returns.T).sum()
-    cumulative_pnl = portfolio_returns.cumsum()
-    sharpe_ratio = portfolio_returns.mean() / portfolio_returns.std() if portfolio_returns.std() != 0 else 0
-    max_drawdown = (cumulative_pnl.max() - cumulative_pnl.min()) / cumulative_pnl.max() if cumulative_pnl.max() != 0 else 0
+    try:
+        logging.debug("Optimizing portfolio using Riskfolio-Lib...")
+        port = rp.Portfolio(returns=returns)
 
-    print(f"[DEBUG] Portfolio Performance:")
-    print(f"Sharpe Ratio: {sharpe_ratio}, Max Drawdown: {max_drawdown}")
-    return portfolio_returns, cumulative_pnl, sharpe_ratio, max_drawdown
+        # Estimate statistics
+        port.assets_stats(method_mu="hist", method_cov="hist")
+        logging.debug("Calculated portfolio statistics.")
+
+        # Optimize portfolio for maximum Sharpe ratio
+        weights = port.optimization(
+            model="Classic",
+            rm="MV",
+            obj="Sharpe",
+            rf=0,
+            l=0
+        )
+        logging.debug(f"Optimized weights:\n{weights}")
+        return weights
+    except Exception as e:
+        logging.error(f"Portfolio optimization failed: {e}")
+        raise
+
+def evaluate_performance(weights, returns):
+    """
+    Evaluate portfolio performance: Sharpe Ratio, Max Drawdown, Cumulative PnL.
+    """
+    try:
+        portfolio_returns = (weights.T @ returns.T).sum()
+        cumulative_pnl = portfolio_returns.cumsum()
+        sharpe_ratio = portfolio_returns.mean() / portfolio_returns.std() if portfolio_returns.std() != 0 else 0
+        max_drawdown = (cumulative_pnl.max() - cumulative_pnl.min()) / cumulative_pnl.max() if cumulative_pnl.max() != 0 else 0
+
+        logging.debug("Evaluated portfolio performance.")
+        logging.debug(f"Sharpe Ratio: {sharpe_ratio}")
+        logging.debug(f"Max Drawdown: {max_drawdown}")
+        return portfolio_returns, cumulative_pnl, sharpe_ratio, max_drawdown
+    except Exception as e:
+        logging.error(f"Performance evaluation failed: {e}")
+        raise
 
 def save_submission(submission_dict, file_path):
     """
-    Save the submission dictionary to a file in append mode.
+    Save submission to a file.
     """
     try:
         with open(file_path, "a") as file:
             file.write(f"{LATEST_RELEASE}: {submission_dict}\n")
-        print(f"[DEBUG] Submission successfully saved to {file_path}.")
+        logging.debug(f"Submission successfully saved to {file_path}.")
     except Exception as e:
-        print(f"[ERROR] Failed to save submission: {e}")
+        logging.error(f"Failed to save submission: {e}")
         raise
 
 def main():
-    latest_file_path = f"{DATA_FOLDER}/release_{LATEST_RELEASE}.crypt"
-
     try:
-        # Load and process data
-        data = process_data(latest_file_path, PASSWORD)
+        # File path
+        latest_file_path = f"{DATA_FOLDER}/release_{LATEST_RELEASE}.crypt"
+
+        # Step 1: Load and decrypt data
+        data = load_and_decrypt_data(latest_file_path, PASSWORD)
+
+        # Step 2: Clean the data
         data = clean_data(data)
+        logging.debug(f"Data after cleaning:\n{data.head()}")
 
-        # Optimize portfolio using Riskfolio-Lib
-        optimized_weights = optimize_portfolio_riskfolio(data)
+        # Step 3: Calculate returns
+        returns = calculate_returns(data)
+        logging.debug(f"Returns after cleaning:\n{returns.head()}")
 
-        # Validate constraints
-        abs_sum_ok, max_abs_ok = validate_constraints(optimized_weights)
-        if not abs_sum_ok or not max_abs_ok:
-            raise ValueError(
-                f"Validation failed: abs_sum_ok={abs_sum_ok}, max_abs_ok={max_abs_ok}. "
-                f"Check the weights: {optimized_weights}"
-            )
+        # Step 4: Validate returns data
+        validate_data(returns)
 
-        # Evaluate performance
-        portfolio_returns, cumulative_pnl, sharpe_ratio, max_drawdown = evaluate_performance(optimized_weights, data)
+        # Step 5: Optimize portfolio
+        weights = optimize_portfolio(returns)
 
-        # Prepare submission dictionary
+        # Step 6: Evaluate performance
+        portfolio_returns, cumulative_pnl, sharpe_ratio, max_drawdown = evaluate_performance(weights, returns)
+
+        # Step 7: Prepare submission
         submission = {
-            **{f"strat_{i}": weight for i, weight in enumerate(optimized_weights)},
+            **weights.to_dict(),
             "team_name": TEAM_NAME,
             "passcode": PASSCODE,
             "sharpe_ratio": sharpe_ratio,
             "max_drawdown": max_drawdown
         }
+        logging.debug(f"Submission:\n{submission}")
 
-        # Output results to terminal
-        print(f"Submission: {submission}")
-
-        # Save submission to file
+        # Step 8: Save submission
         save_submission(submission, SUBMISSION_FILE)
-
     except Exception as e:
-        print(f"[ERROR] Main process failed: {e}")
+        logging.error(f"Main process failed: {e}")
 
 if __name__ == "__main__":
     main()

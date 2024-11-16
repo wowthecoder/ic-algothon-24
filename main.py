@@ -3,25 +3,35 @@ import cryptpandas as crp
 import matplotlib.pyplot as plt
 import verify_submission
 from scipy.optimize import minimize
+import implemeted
+import main1
 
+TEAM_NAME = "limoji"
+PASSCODE = "014ls434>"
 
-decrypted_df = crp.read_encrypted(path='data_releases/release_4215.crypt', password='fM5fswsJijCo4Unp')
+decrypted_df = crp.read_encrypted(path='data_releases/release_4763.crypt', password='YaYVHkUbVZkzNItu')
 # decrypted_df = crp.read_encrypted(path='release_3611.crypt', password='GMJVDf4WWzsV1hfL')
 decrypted_df = decrypted_df.dropna()
 
-print("df")
-print(decrypted_df)
+weights = implemeted.get_weights(decrypted_df)
 
-#release_3611.crypt' the passcode is 'GMJVDf4WWzsV1hfL'
-# plot decrypted_df
-plt.plot(decrypted_df)
-plt.show()
+print(weights)
 
-cumulative_data = decrypted_df.cumsum()
-plt.plot(cumulative_data)
-plt.show()
+# Validate constraints
+abs_sum_ok, max_abs_ok = main1.validate_constraints(weights)
+if not abs_sum_ok or not max_abs_ok:
+    raise ValueError(
+        f"Validation failed: abs_sum_ok={abs_sum_ok}, max_abs_ok={max_abs_ok}. "
+        f"Check the weights: {weights.to_dict()}"
+    )
 
-# Calculate the final cumulative value for each strategy
-final_values = cumulative_data.iloc[-1]
+# Prepare submission dictionary
+submission = {
+    **weights.to_dict(),
+    "team_name": TEAM_NAME,
+    "passcode": PASSCODE,
+}
 
-print(final_values)
+# Output results to terminal
+print("\n\n\n")
+print(f"Submission: {submission}")

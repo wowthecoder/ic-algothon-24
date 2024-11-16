@@ -7,8 +7,8 @@ DATA_FOLDER = "./data_releases"
 TEAM_NAME = "limoji"
 PASSCODE = "014ls434>"
 SUBMISSION_FILE = "submissions1.txt"
-LATEST_RELEASE = "4507"
-PASSWORD = "Zp4NnKkrC6OT0xms"
+LATEST_RELEASE = "4635"
+PASSWORD = "hpuTAsG3v5av6J0D"
 
 def process_data(file_path, password):
     """
