@@ -2,7 +2,9 @@ import pandas as pd
 import numpy as np
 import cryptpandas as crp
 import json
+import re
 from flask import Flask, request, jsonify
+from slackeventsapi import SlackEventAdapter
 from main1 import process_data, calculate_weights_with_constraints, validate_constraints, save_submission
 
 app = Flask(__name__)
@@ -14,11 +16,14 @@ PASSCODE = "014ls434>"
 SUBMISSION_FILE = "submissions1.txt"
 SLACK_CLIENT_ID = "8020284472341.8039893431250"
 SLACK_CLIENT_SECRET = "1ac9f7fe408aa41eabcf2267caecbbb1"
-LOCALHOST_ADDRESS = "http://172.26.157.241:7879/message"
+SLACK_SIGNING_SECRET = "ed6cab16974fec5c811e6a26c6436af8"
+CORRECT_JOE_USER_ID = "U080GCRATP1"
+
+slack_events_adapter = SlackEventAdapter(SLACK_SIGNING_SECRET, endpoint="/slack/events")
 
 #setup
-latest_release = 3867
-latest_password = "1vA9LaAZDTEKPePs"
+latest_release = 4443
+latest_password = "ZJ1eGJfUWUuK5rq6'"
 with open("algothon_google_api.json") as f:
     google_api_credentials = json.load(f)["installed"]
 
@@ -26,13 +31,16 @@ with open("algothon_google_api.json") as f:
 def test():
     return "hello world"
 
-@app.route("/message", methods=['POST'])
-def main():
-    data = request.get_json()
-    if "challenge" in data:
-        return data["challenge"]
-    else:
-        print(data)
+@app.route('/message', methods=['POST'])
+def messagesendpoint():
+    message = request["data"]["event"]
+    print(message, flush=True)
+    # If the incoming message contains :passcode" and the user id is the correct Joe
+    if "passcode" in message['text'] and message["user"] == CORRECT_JOE_USER_ID:
+        match = re.search(r"the passcode is '([^']+)'", message['text'])
+        if match:
+            latest_password = match.group(1)
+
         # Process the latest file
         latest_file_path = f"{DATA_FOLDER}/release_{latest_release}.crypt"
         data = process_data(latest_file_path, latest_password)
@@ -65,3 +73,15 @@ def main():
 
         # Increment latest release
         latest_release += 64
+
+    return latest_password
+
+# b'{"token":"9CRAS865JOqSoMfPHIBRCf7E","team_id":"T080L8CDWA1","context_team_id":"T080L8CDWA1","context_enterprise_id":null,"api_app_id":"A0815S9CP7C","event":{"user":"U080PUF491B","type":"message","ts":"1731772515.498319","client_msg_id":"3E83E933-49FD-42FC-BB32-3F53194106BA","text":"Got me","team":"T080L8CDWA1","blocks":[{"type":"rich_text","block_id":"3cYse","elements":[{"type":"rich_text_section","elements":[{"type":"text","text":"Got me"}]}]}],"channel":"C080P6M4DKL","event_ts":"1731772515.498319","channel_type":"channel"},"type":"event_callback","event_id":"Ev08161YKVBM","event_time":1731772515,"authorizations":[{"enterprise_id":null,"team_id":"T080L8CDWA1","user_id":"U0818EXG5FE","is_bot":true,"is_enterprise_install":false}],"is_ext_shared_channel":false,"event_context":"4-eyJldCI6Im1lc3NhZ2UiLCJ0aWQiOiJUMDgwTDhDRFdBMSIsImFpZCI6IkEwODE1UzlDUDdDIiwiY2lkIjoiQzA4MFA2TTRES0wifQ"}'
+
+
+# Example responder to greetings
+@slack_events_adapter.on("message")
+def idk_whatisthisfor(event_data):
+    return "huh"
+
+slack_events_adapter.start(port=8987)

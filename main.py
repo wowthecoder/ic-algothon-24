@@ -5,8 +5,9 @@ import verify_submission
 from scipy.optimize import minimize
 
 
-decrypted_df = crp.read_encrypted(path='data_releases/release_3739.crypt', password='1vA9LaAZDTEKPePs')
+decrypted_df = crp.read_encrypted(path='data_releases/release_4215.crypt', password='fM5fswsJijCo4Unp')
 # decrypted_df = crp.read_encrypted(path='release_3611.crypt', password='GMJVDf4WWzsV1hfL')
+decrypted_df = decrypted_df.dropna()
 
 print("df")
 print(decrypted_df)
