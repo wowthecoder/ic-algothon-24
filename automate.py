@@ -21,6 +21,7 @@ SLACK_CLIENT_ID = "8020284472341.8039893431250"
 SLACK_CLIENT_SECRET = "1ac9f7fe408aa41eabcf2267caecbbb1"
 SLACK_SIGNING_SECRET = "ed6cab16974fec5c811e6a26c6436af8"
 CORRECT_JOE_USER_ID = "U080GCRATP1"
+GOOGLE_FORM_URL = "https://docs.google.com/forms/u/0/d/e/1FAIpQLSeUYMkI5ce18RL2aF5C8I7mPxF7haH23VEVz7PQrvz0Do0NrQ/formResponse"
 
 slack_events_adapter = SlackEventAdapter(SLACK_SIGNING_SECRET, endpoint="/slack/events")
 
@@ -61,10 +62,16 @@ def messagesendpoint():
 
         # Prepare submission dictionary
         submission = {
-            **weights.to_dict(),
-            "team_name": TEAM_NAME,
-            "passcode": PASSCODE,
+            **weights.to_dict()["weights"],
+            **{
+                "team_name": TEAM_NAME,
+                "passcode": PASSCODE,
+            }
         }
+
+
+  
+
 
         # Output results to terminal
         print("\n\n\n")
@@ -75,9 +82,10 @@ def messagesendpoint():
 
         form_data = {
             "entry.1985358237": json.dumps(submission), 
+            "emailAddress": "jherng365@gmail.com",
         }
 
-        response = requests.post(form_data, data=form_data)
+        response = requests.post(GOOGLE_FORM_URL, data=form_data)
 
         # Check the response
         if response.status_code == 200:

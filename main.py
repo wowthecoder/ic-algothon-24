@@ -11,11 +11,11 @@ import numpy as np
 TEAM_NAME = "limoji"
 PASSCODE = "014ls434>"
 
-decrypted_df = crp.read_encrypted(path='data_releases/release_4955.crypt', password='sL7KZHNduMf2Cy5D')
+decrypted_df = crp.read_encrypted(path='data_releases/release_5339.crypt', password='oGIYkvt7AwKyb22t')
 # decrypted_df = crp.read_encrypted(path='release_3611.crypt', password='GMJVDf4WWzsV1hfL')
 
 cumulative_data = decrypted_df.cumsum()
-plt.plot(cumulative_data["strat_3"])
+plt.plot(cumulative_data["strat_16"])
 plt.show()
 
 
@@ -28,10 +28,16 @@ plt.show()
 
 
 # Prepare submission dictionary
+# Prepare submission dictionary
+
+print(weights)
+
 submission = {
-    **weights.to_dict(),
-    "team_name": TEAM_NAME,
-    "passcode": PASSCODE,
+    **weights.to_dict()["weights"],
+    **{
+        "team_name": TEAM_NAME,
+        "passcode": PASSCODE,
+    }
 }
 
 # Output results to terminal

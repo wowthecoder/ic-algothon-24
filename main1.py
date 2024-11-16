@@ -160,10 +160,12 @@ def main():
             )
 
         # Prepare submission dictionary
-        submission = {
-            **weights.to_dict(),
-            "team_name": TEAM_NAME,
-            "passcode": PASSCODE,
+        submission = { 
+            **weights.to_dict()["weights"],
+            **{
+                "team_name": TEAM_NAME,
+                "passcode": PASSCODE,
+            }
         }
 
         # Output results to terminal
