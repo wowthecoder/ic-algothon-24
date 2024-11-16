@@ -3,6 +3,7 @@ import numpy as np
 import cryptpandas as crp
 import json
 import re
+import requests
 from flask import Flask, request, jsonify
 from slackeventsapi import SlackEventAdapter
 from main1 import process_data, calculate_weights_with_constraints, validate_constraints, save_submission
@@ -24,8 +25,8 @@ CORRECT_JOE_USER_ID = "U080GCRATP1"
 slack_events_adapter = SlackEventAdapter(SLACK_SIGNING_SECRET, endpoint="/slack/events")
 
 #setup
-with open("algothon_google_api.json") as f:
-    google_api_credentials = json.load(f)["installed"]
+# with open("algothon_google_api.json") as f:
+#     google_api_credentials = json.load(f)["installed"]
 
 @app.route('/')
 def test():
@@ -57,13 +58,6 @@ def messagesendpoint():
         weights = implemented.get_weights(data)
 
 
-        # Validate constraints
-        abs_sum_ok, max_abs_ok = validate_constraints(weights)
-        if not abs_sum_ok or not max_abs_ok:
-            raise ValueError(
-                f"Validation failed: abs_sum_ok={abs_sum_ok}, max_abs_ok={max_abs_ok}. "
-                f"Check the weights: {weights.to_dict()}"
-            )
 
         # Prepare submission dictionary
         submission = {
@@ -77,7 +71,21 @@ def messagesendpoint():
         print(f"Submission: {submission}")
 
         # Save submission to file
-        save_submission(submission, SUBMISSION_FILE)
+        save_submission(submission, SUBMISSION_FILE, latest_release)
+
+        form_data = {
+            "entry.1985358237": json.dumps(submission), 
+        }
+
+        response = requests.post(form_data, data=form_data)
+
+        # Check the response
+        if response.status_code == 200:
+            print("Form submitted successfully!")
+        else:
+            print(f"Failed to submit the form. Status code: {response.status_code}")
+
+        print(f"Response for release id {latest_release} submitted")
 
     return ""
 

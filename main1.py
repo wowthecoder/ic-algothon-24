@@ -7,8 +7,8 @@ DATA_FOLDER = "./data_releases"
 TEAM_NAME = "limoji"
 PASSCODE = "014ls434>"
 SUBMISSION_FILE = "submissions1.txt"
-LATEST_RELEASE = "4635"
-PASSWORD = "hpuTAsG3v5av6J0D"
+LATEST_RELEASE = "4251"
+PASSWORD = "VRiYLce0BKVSdrft"
 
 def process_data(file_path, password):
     """
@@ -127,14 +127,14 @@ def validate_constraints(weights):
     return abs_sum_ok, max_abs_ok
 
 
-def save_submission(submission_dict, file_path):
+def save_submission(submission_dict, file_path, release_number):
     """
     Save the submission dictionary to a file in append mode.
     Each submission includes the release identifier for clarity.
     """
     try:
         with open(file_path, "a") as file:
-            file.write(f"{LATEST_RELEASE}: {submission_dict}\n")
+            file.write(f"{release_number}: {submission_dict}\n")
         print(f"[DEBUG] Submission successfully saved to {file_path}.")
     except Exception as e:
         print(f"[ERROR] Failed to save submission: {e}")
