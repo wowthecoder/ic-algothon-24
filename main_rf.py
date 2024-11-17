@@ -1,190 +1,154 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 import cryptpandas as crp
-import riskfolio as rp
-import logging
-from sklearn.preprocessing import StandardScaler
-import warnings
-
-# Suppress warnings for cleaner output
-warnings.filterwarnings("ignore")
-
-# Configure logging
-logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(message)s')
 
 # Constants
 DATA_FOLDER = "./data_releases"
 TEAM_NAME = "limoji"
 PASSCODE = "014ls434>"
-SUBMISSION_FILE = "submissions1.txt"
-LATEST_RELEASE = "4507"
-PASSWORD = "Zp4NnKkrC6OT0xms"
+SUBMISSION_FILE = "submissions.txt"
+LATEST_RELEASE = "4635"
+PASSWORD = "hpuTAsG3v5av6J0D"
 
-def load_and_decrypt_data(file_path, password):
-    """
-    Load and decrypt the dataset.
-    """
+# Data Cleaning and Feature Engineering
+def process_data(file_path, password):
     try:
-        decrypted_data = crp.read_encrypted(file_path, password=password)
-        logging.debug(f"Successfully decrypted data from {file_path}.")
-        return decrypted_data
+        data = crp.read_encrypted(file_path, password=password)
+        print(f"[DEBUG] Successfully decrypted data from {file_path}. Shape: {data.shape}")
+        return data
     except Exception as e:
-        logging.error(f"Failed to decrypt data: {e}")
+        print(f"[ERROR] Failed to process data from {file_path}: {e}")
         raise
 
 def clean_data(data):
     """
-    Clean the dataset by handling missing, infinite, and extreme outlier values.
+    Clean PnL data by removing NaNs, infinities, and capping extreme outliers.
     """
-    try:
-        logging.debug("Cleaning data...")
+    print("[DEBUG] Cleaning data...")
+    data.replace([np.inf, -np.inf], np.nan, inplace=True)
+    data.fillna(0.0, inplace=True)
+    
+    # Capping outliers to +/- 5 standard deviations
+    std = data.std(axis=0)  # Specify axis=0 for column-wise standard deviation
+    mean = data.mean(axis=0)  # Specify axis=0 for column-wise mean
+    data = data.clip(lower=mean - 5 * std, upper=mean + 5 * std, axis=1)  # Explicit axis=1 for columns
+    print("[DEBUG] Data cleaned. Shape:", data.shape)
+    return data
 
-        # Replace infinite values with NaN
-        data.replace([np.inf, -np.inf], np.nan, inplace=True)
-        logging.debug("Replaced infinite values with NaN.")
+# Weight Calculations
+def calculate_sharpe_weights(data):
+    print("[DEBUG] Calculating Sharpe ratio weights...")
+    expected_returns = data.mean()
+    volatilities = data.std()
+    sharpe_ratios = expected_returns / volatilities
+    weights = sharpe_ratios / sharpe_ratios.abs().sum()
+    print("[DEBUG] Initial Sharpe ratio weights:\n", weights)
+    return redistribute_weights(weights)
 
-        # Check for columns with all NaN values
-        all_nan_columns = data.columns[data.isna().all()].tolist()
-        if all_nan_columns:
-            logging.warning(f"Columns with all NaN values: {all_nan_columns}")
-            data.drop(columns=all_nan_columns, inplace=True)
-            logging.debug(f"Dropped columns with all NaN values.")
+def calculate_momentum_weights(data):
+    print("[DEBUG] Calculating momentum weights...")
+    momentum_scores = data.cumsum().iloc[-1]
+    weights = momentum_scores / momentum_scores.abs().sum()
+    print("[DEBUG] Initial momentum weights:\n", weights)
+    return redistribute_weights(weights)
 
-        # Replace remaining NaN with column median
-        data.fillna(data.median(), inplace=True)
-        logging.debug("Replaced remaining NaN with column medians.")
-
-        # Handle outliers using IQR
-        Q1 = data.quantile(0.25)
-        Q3 = data.quantile(0.75)
-        IQR = Q3 - Q1
-        data = data.clip(lower=Q1 - 1.5 * IQR, upper=Q3 + 1.5 * IQR, axis=1)
-        logging.debug("Handled outliers using IQR method.")
-
-        return data
-    except Exception as e:
-        logging.error(f"Data cleaning failed: {e}")
-        raise
-
-def calculate_returns(data):
+def redistribute_weights(weights):
     """
-    Calculate percentage returns from adjusted prices.
+    Dynamically redistribute weights to meet constraints.
     """
-    try:
-        returns = data.pct_change().dropna()
-        logging.debug("Calculated percentage returns.")
-        return returns
-    except Exception as e:
-        logging.error(f"Return calculation failed: {e}")
-        raise
+    max_iterations = 100
+    for iteration in range(max_iterations):
+        over_allocated = weights[weights > 0.1]
+        under_allocated = weights[weights < -0.1]
+        if over_allocated.empty and under_allocated.empty:
+            break
+        for idx in over_allocated.index:
+            excess = weights[idx] - 0.1
+            weights[idx] = 0.1
+            eligible = weights[(weights > 0) & (weights < 0.1)].index
+            if not eligible.empty:
+                redistribution = excess / len(eligible)
+                weights.loc[eligible] += redistribution
+        for idx in under_allocated.index:
+            excess = weights[idx] + 0.1
+            weights[idx] = -0.1
+            eligible = weights[(weights < 0) & (weights > -0.1)].index
+            if not eligible.empty:
+                redistribution = excess / len(eligible)
+                weights.loc[eligible] += redistribution
+        weights /= weights.abs().sum()
+    print("[DEBUG] Final redistributed weights:\n", weights)
+    return weights
 
-def validate_data(data):
-    """
-    Validate the dataset to ensure it doesn't contain inf or NaN values.
-    """
-    if data.isnull().values.any():
-        logging.error("Data contains NaN values.")
-        raise ValueError("Data contains NaN values.")
-    if np.isinf(data.values).any():
-        logging.error("Data contains infinite values.")
-        raise ValueError("Data contains infinite values.")
-    logging.debug("Data validation passed.")
+# Performance Evaluation
+def evaluate_performance(data, weights):
+    portfolio_returns = data @ weights
+    cumulative_pnl = portfolio_returns.cumsum()
+    mean_return = portfolio_returns.mean()
+    std_dev = portfolio_returns.std()
+    sharpe_ratio = mean_return / std_dev if std_dev > 0 else 0
+    max_drawdown = (cumulative_pnl - cumulative_pnl.cummax()).min()
+    
+    print("[METRICS] Sharpe Ratio:", sharpe_ratio)
+    print("[METRICS] Mean Return:", mean_return)
+    print("[METRICS] Standard Deviation:", std_dev)
+    print("[METRICS] Max Drawdown:", max_drawdown)
+    print("[METRICS] Final Cumulative PnL:", cumulative_pnl.iloc[-1])
+    return portfolio_returns, cumulative_pnl
 
-def optimize_portfolio(returns):
-    """
-    Optimize portfolio weights using Riskfolio-Lib.
-    """
-    try:
-        logging.debug("Optimizing portfolio using Riskfolio-Lib...")
-        port = rp.Portfolio(returns=returns)
+# Visualization
+def plot_pnl(portfolio_returns, cumulative_pnl):
+    plt.figure(figsize=(12, 6))
+    plt.plot(cumulative_pnl, label="Cumulative PnL", color="blue")
+    plt.title("Portfolio Cumulative PnL")
+    plt.xlabel("Time")
+    plt.ylabel("PnL")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
-        # Estimate statistics
-        port.assets_stats(method_mu="hist", method_cov="hist")
-        logging.debug("Calculated portfolio statistics.")
+    plt.figure(figsize=(12, 6))
+    plt.plot(portfolio_returns, label="Per-Period PnL", color="green")
+    plt.title("Portfolio Per-Period PnL")
+    plt.xlabel("Time")
+    plt.ylabel("PnL")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
-        # Optimize portfolio for maximum Sharpe ratio
-        weights = port.optimization(
-            model="Classic",
-            rm="MV",
-            obj="Sharpe",
-            rf=0,
-            l=0
-        )
-        logging.debug(f"Optimized weights:\n{weights}")
-        return weights
-    except Exception as e:
-        logging.error(f"Portfolio optimization failed: {e}")
-        raise
+def plot_allocation(weights):
+    abs_weights = weights.abs()
+    labels = [f"{idx} (short)" if w < 0 else idx for idx, w in weights.items()]
+    colors = ["red" if w < 0 else "green" for w in weights]
 
-def evaluate_performance(weights, returns):
-    """
-    Evaluate portfolio performance: Sharpe Ratio, Max Drawdown, Cumulative PnL.
-    """
-    try:
-        portfolio_returns = (weights.T @ returns.T).sum()
-        cumulative_pnl = portfolio_returns.cumsum()
-        sharpe_ratio = portfolio_returns.mean() / portfolio_returns.std() if portfolio_returns.std() != 0 else 0
-        max_drawdown = (cumulative_pnl.max() - cumulative_pnl.min()) / cumulative_pnl.max() if cumulative_pnl.max() != 0 else 0
+    plt.figure(figsize=(8, 8))
+    plt.pie(abs_weights, labels=labels, autopct="%.1f%%", startangle=90, colors=colors, wedgeprops={"edgecolor": "black"})
+    plt.title("Portfolio Allocation (Red = Short, Green = Long)")
+    plt.show()
 
-        logging.debug("Evaluated portfolio performance.")
-        logging.debug(f"Sharpe Ratio: {sharpe_ratio}")
-        logging.debug(f"Max Drawdown: {max_drawdown}")
-        return portfolio_returns, cumulative_pnl, sharpe_ratio, max_drawdown
-    except Exception as e:
-        logging.error(f"Performance evaluation failed: {e}")
-        raise
-
-def save_submission(submission_dict, file_path):
-    """
-    Save submission to a file.
-    """
-    try:
-        with open(file_path, "a") as file:
-            file.write(f"{LATEST_RELEASE}: {submission_dict}\n")
-        logging.debug(f"Submission successfully saved to {file_path}.")
-    except Exception as e:
-        logging.error(f"Failed to save submission: {e}")
-        raise
-
+# Main Function
 def main():
+    file_path = f"{DATA_FOLDER}/release_{LATEST_RELEASE}.crypt"
     try:
-        # File path
-        latest_file_path = f"{DATA_FOLDER}/release_{LATEST_RELEASE}.crypt"
-
-        # Step 1: Load and decrypt data
-        data = load_and_decrypt_data(latest_file_path, PASSWORD)
-
-        # Step 2: Clean the data
+        data = process_data(file_path, PASSWORD)
         data = clean_data(data)
-        logging.debug(f"Data after cleaning:\n{data.head()}")
-
-        # Step 3: Calculate returns
-        returns = calculate_returns(data)
-        logging.debug(f"Returns after cleaning:\n{returns.head()}")
-
-        # Step 4: Validate returns data
-        validate_data(returns)
-
-        # Step 5: Optimize portfolio
-        weights = optimize_portfolio(returns)
-
-        # Step 6: Evaluate performance
-        portfolio_returns, cumulative_pnl, sharpe_ratio, max_drawdown = evaluate_performance(weights, returns)
-
-        # Step 7: Prepare submission
-        submission = {
-            **weights.to_dict(),
-            "team_name": TEAM_NAME,
-            "passcode": PASSCODE,
-            "sharpe_ratio": sharpe_ratio,
-            "max_drawdown": max_drawdown
-        }
-        logging.debug(f"Submission:\n{submission}")
-
-        # Step 8: Save submission
-        save_submission(submission, SUBMISSION_FILE)
+        
+        sharpe_weights = calculate_sharpe_weights(data)
+        momentum_weights = calculate_momentum_weights(data)
+        
+        combined_weights = (sharpe_weights + momentum_weights) / 2
+        portfolio_returns, cumulative_pnl = evaluate_performance(data, combined_weights)
+        
+        # Visualization
+        plot_pnl(portfolio_returns, cumulative_pnl)
+        plot_allocation(combined_weights)
+        
+        # Save submission
+        submission = {**combined_weights.to_dict(), "team_name": TEAM_NAME, "passcode": PASSCODE}
+        print("[DEBUG] Submission:\n", submission)
     except Exception as e:
-        logging.error(f"Main process failed: {e}")
+        print(f"[ERROR] Main process failed: {e}")
 
 if __name__ == "__main__":
     main()

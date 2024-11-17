@@ -3,12 +3,11 @@ import numpy as np
 import cryptpandas as crp
 import json
 import re
-import requests
 from flask import Flask, request, jsonify
 from slackeventsapi import SlackEventAdapter
 from main1 import process_data, calculate_weights_with_constraints, validate_constraints, save_submission
 import implemented
-
+import requests
 
 app = Flask(__name__)
 
@@ -21,20 +20,32 @@ SLACK_CLIENT_ID = "8020284472341.8039893431250"
 SLACK_CLIENT_SECRET = "1ac9f7fe408aa41eabcf2267caecbbb1"
 SLACK_SIGNING_SECRET = "ed6cab16974fec5c811e6a26c6436af8"
 CORRECT_JOE_USER_ID = "U080GCRATP1"
-GOOGLE_FORM_URL = "https://docs.google.com/forms/u/0/d/e/1FAIpQLSeUYMkI5ce18RL2aF5C8I7mPxF7haH23VEVz7PQrvz0Do0NrQ/formResponse"
 
 slack_events_adapter = SlackEventAdapter(SLACK_SIGNING_SECRET, endpoint="/slack/events")
 
 #setup
-# with open("algothon_google_api.json") as f:
-#     google_api_credentials = json.load(f)["installed"]
+with open("algothon_google_api.json") as f:
+    google_api_credentials = json.load(f)["installed"]
 
 @app.route('/')
 def test():
     return "hello world"
 
+google_form_sent = []
+
+google_url_to_open = ""
+
+@app.route("/url-to-open", methods=['GET'])
+def url_to_open_endpoint():
+    global google_url_to_open
+    return google_url_to_open
+
 @app.route('/message', methods=['POST'])
 def messagesendpoint():
+    global google_form_sent
+    global google_url_to_open
+
+
     latest_release = None 
     latest_password = None
     message = request.get_json()["event"]
@@ -59,7 +70,15 @@ def messagesendpoint():
         weights = implemented.get_weights(data)
 
 
+        # Validate constraints
+        # abs_sum_ok, max_abs_ok = validate_constraints(weights)
+        # if not abs_sum_ok or not max_abs_ok:
+        #     raise ValueError(
+        #         f"Validation failed: abs_sum_ok={abs_sum_ok}, max_abs_ok={max_abs_ok}. "
+        #         f"Check the weights: {weights.to_dict()}"
+        #     )
 
+        # Prepare submission dictionary
         # Prepare submission dictionary
         submission = {
             **weights.to_dict()["weights"],
@@ -70,30 +89,20 @@ def messagesendpoint():
         }
 
 
-  
-
-
         # Output results to terminal
         print("\n\n\n")
         print(f"Submission: {submission}")
 
+        if latest_release not in google_form_sent:
+            google_form_url = f"https://docs.google.com/forms/d/e/1FAIpQLSeUYMkI5ce18RL2aF5C8I7mPxF7haH23VEVz7PQrvz0Do0NrQ/formResponse?entry.1985358237={json.dumps(submission)}&emailAddress=lissanartist@gmail.com"
+            # response = requests.get(google_form_url)
+            # print(response)
+            google_url_to_open = google_form_url
+
+            google_form_sent.append(latest_release)
+
         # Save submission to file
         save_submission(submission, SUBMISSION_FILE, latest_release)
-
-        form_data = {
-            "entry.1985358237": json.dumps(submission), 
-            "emailAddress": "jherng365@gmail.com",
-        }
-
-        response = requests.post(GOOGLE_FORM_URL, data=form_data)
-
-        # Check the response
-        if response.status_code == 200:
-            print("Form submitted successfully!")
-        else:
-            print(f"Failed to submit the form. Status code: {response.status_code}")
-
-        print(f"Response for release id {latest_release} submitted")
 
     return ""
 

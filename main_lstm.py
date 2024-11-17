@@ -3,7 +3,7 @@ import numpy as np
 import cryptpandas as crp
 from sklearn.preprocessing import StandardScaler
 from keras.models import Sequential
-from keras.layers import LSTM, Dense, Input
+from keras.layers import LSTM, Dense, Input, TimeDistributed
 from scipy.optimize import minimize
 
 # Constants
@@ -11,9 +11,9 @@ DATA_FOLDER = "./data_releases"
 TEAM_NAME = "limoji"
 PASSCODE = "014ls434>"
 SUBMISSION_FILE = "submissions1.txt"
-LATEST_RELEASE = "4059"
-PASSWORD = "HkpYXpKituGernrk"
-TIME_STEPS = 10
+LATEST_RELEASE = "6427"
+PASSWORD = "knPxrnUGohNFbMW0"
+TIME_STEPS = 64
 
 def process_data(file_path, password):
     try:
@@ -26,8 +26,8 @@ def process_data(file_path, password):
 
 def clean_data(data):
     print("[DEBUG] Cleaning data...")
-    data = data.replace([np.inf, -np.inf], np.nan)
-    data = data.fillna(0.0)
+    data.replace([np.inf, -np.inf], 0, inplace=True)
+    data.fillna(0, inplace=True)
     print(f"[DEBUG] Data after cleaning:\n{data}")
     return data
 
@@ -42,9 +42,9 @@ def build_lstm_model(input_shape):
     """
     model = Sequential()
     model.add(Input(shape=input_shape))
-    model.add(LSTM(50, return_sequences=True))
-    model.add(LSTM(50))
-    model.add(Dense(input_shape[1]))
+    model.add(LSTM(100, return_sequences=True))
+    model.add(LSTM(100, return_sequences=True))
+    model.add(TimeDistributed(Dense(input_shape[1])))
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
@@ -53,12 +53,12 @@ def create_lstm_input(data, time_steps):
     Prepare data for LSTM input by creating sequences of `time_steps`.
     """
     X, y = [], []
-    for i in range(time_steps, len(data)):
+    for i in range(time_steps, len(data)-time_steps):
         X.append(data[i-time_steps:i])
-        y.append(data[i])
+        y.append(data[i:i+time_steps])
     return np.array(X), np.array(y)
 
-def forecast_returns(data, model, scaler, time_steps=10):
+def forecast_returns(data, model, scaler, time_steps=TIME_STEPS):
     scaled_data, _ = scale_data(data)
     X = []
     for i in range(time_steps, len(scaled_data)):
@@ -80,7 +80,8 @@ def momentum_strategy(data):
 
 def lstm_strategy(data, lstm_model, scaler, time_steps):
     forecasted_returns = forecast_returns(data, lstm_model, scaler, time_steps)
-    return optimize_portfolio(forecasted_returns)
+    print("[DEBUG]Forecasted return is:\n", forecasted_returns)
+    return normalize_weights(forecasted_returns)
 
 def equal_weight_strategy(data):
     num_assets = data.shape[1]
@@ -95,7 +96,7 @@ def normalize_weights(weights):
     abs_sum = np.sum(np.abs(weights))
     if abs_sum > 0:
         weights /= abs_sum
-    weights *= 1.0 / np.sum(np.abs(weights))
+    weights /= np.sum(np.abs(weights))
     return weights
 
 def calculate_pnl(weights, returns):
@@ -142,6 +143,8 @@ def main():
         data = clean_data(data)
         scaled_data, scaler = scale_data(data)
         X_train, y_train = create_lstm_input(scaled_data, TIME_STEPS)
+        print("Data shape is:", data.shape)
+        print("y_train shape is:", y_train.shape)
 
         # Train LSTM model
         input_shape = (TIME_STEPS, data.shape[1])
