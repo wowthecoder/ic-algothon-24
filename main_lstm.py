@@ -2,17 +2,18 @@ import pandas as pd
 import numpy as np
 import cryptpandas as crp
 from sklearn.preprocessing import StandardScaler
-from keras.models import Sequential
+from keras.models import Sequential, load_model
 from keras.layers import LSTM, Dense, Input, TimeDistributed
 from scipy.optimize import minimize
+import matplotlib.pyplot as plt
 
 # Constants
 DATA_FOLDER = "./data_releases"
 TEAM_NAME = "limoji"
 PASSCODE = "014ls434>"
 SUBMISSION_FILE = "submissions1.txt"
-LATEST_RELEASE = "6427"
-PASSWORD = "knPxrnUGohNFbMW0"
+LATEST_RELEASE = "8347"
+PASSWORD = "e2tTR7g9oM2ttIzH"
 TIME_STEPS = 64
 
 def process_data(file_path, password):
@@ -58,14 +59,13 @@ def create_lstm_input(data, time_steps):
         y.append(data[i:i+time_steps])
     return np.array(X), np.array(y)
 
+# Predict the next TIME_STEPS time steps
 def forecast_returns(data, model, scaler, time_steps=TIME_STEPS):
-    scaled_data, _ = scale_data(data)
-    X = []
-    for i in range(time_steps, len(scaled_data)):
-        X.append(scaled_data[i-time_steps:i])
-    X = np.array(X)
+    scaled_data = scaler.transform(data)
+    # We are predicting 1 batch, so wrap with with an array to fit the shape (1, 64, num_columns)
+    X = np.array([scaled_data[-time_steps:]])
     predictions = model.predict(X)
-    predictions = scaler.inverse_transform(predictions)
+    predictions = scaler.inverse_transform(predictions[0])
     return pd.DataFrame(predictions, columns=data.columns)
 
 def mean_reversion_strategy(data):
@@ -81,7 +81,7 @@ def momentum_strategy(data):
 def lstm_strategy(data, lstm_model, scaler, time_steps):
     forecasted_returns = forecast_returns(data, lstm_model, scaler, time_steps)
     print("[DEBUG]Forecasted return is:\n", forecasted_returns)
-    return normalize_weights(forecasted_returns)
+    return pd.DataFrame(normalize_weights(forecasted_returns.to_numpy()), columns=data.columns)
 
 def equal_weight_strategy(data):
     num_assets = data.shape[1]
@@ -99,24 +99,31 @@ def normalize_weights(weights):
     weights /= np.sum(np.abs(weights))
     return weights
 
-def calculate_pnl(weights, returns):
-    portfolio_returns = np.dot(returns, weights)
+def calculate_pnl(weights, returns):    
+    # For lstm strategy, do element-wise multiplication
+    if weights.shape == returns.shape:
+        portfolio_returns = weights * returns 
+    # Otherwise, results is (TIME_STEP, num_strats) and weights is (num_strats,)
+    else:
+        portfolio_returns = returns @ weights
     cumulative_pnl = np.nancumsum(portfolio_returns)
     sharpe_ratio = np.nanmean(portfolio_returns) / np.nanstd(portfolio_returns) if np.nanstd(portfolio_returns) != 0 else 0
     max_drawdown = np.nanmax(np.maximum.accumulate(cumulative_pnl) - cumulative_pnl)
     return portfolio_returns, cumulative_pnl, sharpe_ratio, max_drawdown
 
-def compare_strategies(data, lstm_model, scaler, time_steps):
+# lstm_preds is a dataframe
+def compare_strategies(lstm_preds):
     strategies = {
-        "Mean Reversion": mean_reversion_strategy(data),
-        "Momentum": momentum_strategy(data),
-        "LSTM Forecasting": lstm_strategy(data, lstm_model, scaler, time_steps),
-        "Equal Weight": equal_weight_strategy(data)
+        "Mean Reversion": mean_reversion_strategy(lstm_preds),
+        "Momentum": momentum_strategy(lstm_preds),
+        "LSTM Forecasting": lstm_preds,
+        "Equal Weight": equal_weight_strategy(lstm_preds)
     }
     results = {}
-    returns = data.pct_change().iloc[1:].fillna(0)  # Daily returns
+    # (data[i] - data[i-1]) / data[i-1], prepending a row of zeros before the first row
+    returns = lstm_preds.pct_change().fillna(0)  # Daily returns
     for name, weights in strategies.items():
-        pnl, cum_pnl, sharpe, drawdown = calculate_pnl(weights, returns)
+        pnl, cum_pnl, sharpe, drawdown = calculate_pnl(weights, returns.to_numpy())
         results[name] = {
             "PnL": pnl,
             "Cumulative PnL": cum_pnl,
@@ -125,6 +132,44 @@ def compare_strategies(data, lstm_model, scaler, time_steps):
             "Weights": weights
         }
     return results
+
+def validate_constraints(weights):
+    """
+    Validate that all weight constraints are satisfied.
+    """
+    debug("Validating constraints...")
+    total_allocation = np.sum(np.abs(weights))
+    min_weight = np.min(weights)
+    max_weight = np.max(weights)
+
+    constraints_met = (
+        np.all(np.abs(weights) <= 0.1) and  # Check max exposure
+        np.isclose(total_allocation, 1.0)  # Check total allocation
+    )
+
+    print(f"Total allocation: {total_allocation}, Min weight: {min_weight}, Max weight: {max_weight}")
+
+    if constraints_met:
+        print("All constraints are satisfied.")
+        return True
+    else:
+        print(f"Constraints not satisfied: Total allocation={total_allocation}, Min weight={min_weight}, Max weight={max_weight}")
+        return False
+
+def plot_data(data, title, figsize=(12, 6)):
+    """
+    Plot the given data for visualization.
+    """
+    plt.figure(figsize=figsize)
+    for column in data.columns:
+        plt.plot(data.index, data[column], label=column, alpha=0.7)
+    plt.title(title)
+    plt.xlabel("Index")
+    plt.ylabel("Values")
+    plt.legend(loc="upper right", bbox_to_anchor=(1.15, 1))
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 def save_submission(submission_dict, file_path):
     try:
@@ -137,7 +182,7 @@ def save_submission(submission_dict, file_path):
 
 def main():
     latest_file_path = f"{DATA_FOLDER}/release_{LATEST_RELEASE}.crypt"
-    try:
+    if True:
         # Load and process data
         data = process_data(latest_file_path, PASSWORD)
         data = clean_data(data)
@@ -147,17 +192,37 @@ def main():
         print("y_train shape is:", y_train.shape)
 
         # Train LSTM model
-        input_shape = (TIME_STEPS, data.shape[1])
-        lstm_model = build_lstm_model(input_shape)
-        lstm_model.fit(X_train, y_train, epochs=10, batch_size=32)
+        # input_shape = (TIME_STEPS, data.shape[1])
+        # lstm_model = build_lstm_model(input_shape)
+        # lstm_model.fit(X_train, y_train, epochs=15, batch_size=32)
+        # lstm_model.save('lstm_model_8347.keras')
+
+        # Load the trained model
+        lstm_model = load_model('lstm_model_8347.keras')
+        forecast = forecast_returns(data, lstm_model, scaler, TIME_STEPS)
+        # Randomly sample 20 columns
+        sampled_columns = forecast.sample(n=20, axis=1)
+
+        # Get the last 128 rows of the sampled columns
+        graphData = pd.concat([data[sampled_columns.columns].tail(64), sampled_columns])
+        print(graphData)
+        plot_data(graphData, "Forecast")
+
+        # Forecast results (Predict next 64 timesteps)
+        # This is a dataframe
+        weights = lstm_strategy(data, lstm_model, scaler, TIME_STEPS)
+
+
 
         # Compare strategies
-        results = compare_strategies(data, lstm_model, scaler, TIME_STEPS)
+        results = compare_strategies(weights)
         best_strategy = max(results, key=lambda x: results[x]["Sharpe Ratio"])
         best_weights = results[best_strategy]["Weights"]
+        best_sharpe = results[best_strategy]["Sharpe Ratio"]
 
         print(f"[DEBUG] Best Strategy: {best_strategy}")
         print(f"[DEBUG] Best Weights:\n{best_weights}")
+        print(f"[DEBUG] Best Sharpe Ratio: {best_sharpe}")
 
         # Prepare submission
         submission = {
@@ -166,10 +231,11 @@ def main():
             "passcode": PASSCODE,
             "best_strategy": best_strategy
         }
+        print(submission)
         save_submission(submission, SUBMISSION_FILE)
 
-    except Exception as e:
-        print(f"[ERROR] Main process failed: {e}")
+    # except Exception as e:
+    #     print(f"[ERROR] Main process failed: {e}")
 
 if __name__ == "__main__":
     main()
